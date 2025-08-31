@@ -11,11 +11,14 @@ defmodule Wallaby.SessionStore do
     GenServer.start_link(__MODULE__, args, opts)
   end
 
-  def monitor(store \\ __MODULE__, session) do
+  # Add 1-argument versions for backward compatibility
+  def monitor(session), do: monitor(__MODULE__, session)
+  def monitor(store, session) do
     GenServer.call(store, {:monitor, session}, 10_000)
   end
 
-  def demonitor(store \\ __MODULE__, session) do
+  def demonitor(session), do: demonitor(__MODULE__, session)
+  def demonitor(store, session) do
     GenServer.call(store, {:demonitor, session})
   end
 
@@ -38,14 +41,17 @@ defmodule Wallaby.SessionStore do
 
     Application.ensure_all_started(:ex_unit)
 
-    ExUnit.after_suite(fn _ ->
-      try do
-        :ets.tab2list(tid)
-        |> Enum.each(&delete_sessions/1)
-      rescue
-        _ -> nil
-      end
-    end)
+    # Fix for production: Only call ExUnit.after_suite if it's available
+    if Code.ensure_loaded?(ExUnit) && function_exported?(ExUnit, :after_suite, 1) do
+      ExUnit.after_suite(fn _ ->
+        try do
+          :ets.tab2list(tid)
+          |> Enum.each(&delete_sessions/1)
+        rescue
+          _ -> nil
+        end
+      end)
+    end
 
     {:ok, %{ets_table: tid}}
   end
