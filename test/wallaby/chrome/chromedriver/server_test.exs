@@ -154,13 +154,21 @@ defmodule Wallaby.Chrome.Chromedriver.ServerTest do
   end
 
   defp assert_webdriver_api_ready(base_url) when is_binary(base_url) do
-    assert {:ok, %WebDriverClient.ServerStatus{ready?: true}} =
-             base_url |> build_webdriver_client_config() |> WebDriverClient.fetch_server_status()
+    assert {:ok, %{"value" => %{"ready" => true}}} = fetch_server_status(base_url)
   end
 
   defp refute_webdriver_api_ready(base_url) when is_binary(base_url) do
-    assert {:error, %WebDriverClient.ConnectionError{reason: :econnrefused}} =
-             base_url |> build_webdriver_client_config() |> WebDriverClient.fetch_server_status()
+    assert {:error, {:failed_connect, info}} = fetch_server_status(base_url)
+    assert {:inet, [:inet], :econnrefused} in info
+  end
+
+  defp fetch_server_status(base_url) when is_binary(base_url) do
+    status_url = String.trim_trailing(base_url, "/") <> "/status"
+
+    case :httpc.request(:get, {to_charlist(status_url), []}, [autoredirect: false], body_format: :binary) do
+      {:ok, {{_, 200, _}, _headers, body}} -> Jason.decode(body)
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp kill_os_process(pid) when is_integer(pid) do
@@ -176,9 +184,5 @@ defmodule Wallaby.Chrome.Chromedriver.ServerTest do
       _ ->
         false
     end
-  end
-
-  defp build_webdriver_client_config(base_url) when is_binary(base_url) do
-    WebDriverClient.Config.build(base_url, protocol: :w3c)
   end
 end

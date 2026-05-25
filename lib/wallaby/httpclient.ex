@@ -44,7 +44,7 @@ defmodule Wallaby.HTTPClient do
           | {:error, web_driver_error_reason | Jason.DecodeError.t() | String.t()}
           | no_return
   defp make_request(_, _, _, 5, retry_reasons) do
-    ["Wallaby had an internal issue with HTTPoison:" | retry_reasons]
+    ["Wallaby had an internal issue with the webdriver HTTP request:" | retry_reasons]
     |> Enum.uniq()
     |> Enum.join("\n")
     |> raise
@@ -52,10 +52,10 @@ defmodule Wallaby.HTTPClient do
 
   defp make_request(method, url, body, retry_count, retry_reasons) do
     method
-    |> HTTPoison.request(url, body, headers(), request_opts())
+    |> httpc_request(url, body)
     |> handle_response()
     |> case do
-      {:error, :httpoison, error} ->
+      {:error, :httpc, error} ->
         :timer.sleep(jitter())
         make_request(method, url, body, retry_count + 1, [inspect(error) | retry_reasons])
 
@@ -64,24 +64,59 @@ defmodule Wallaby.HTTPClient do
     end
   end
 
-  @spec handle_response({:ok, HTTPoison.Response.t()} | {:error, HTTPoison.Error.t()}) ::
-          {:ok, response}
-          | {:error, web_driver_error_reason | Jason.DecodeError.t() | String.t()}
-          | {:error, :httpoison, HTTPoison.Error.t()}
-          | no_return
-  defp handle_response(resp) do
-    case resp do
-      {:error, %HTTPoison.Error{} = error} ->
-        {:error, :httpoison, error}
+  defp httpc_request(method, url, body) do
+    request =
+      case method do
+        :get -> {to_charlist(url), httpc_headers()}
+        :delete -> {to_charlist(url), httpc_headers()}
+        _ -> {to_charlist(url), httpc_headers(), ~c"application/json;charset=UTF-8", body}
+      end
 
-      {:ok, %HTTPoison.Response{status_code: 204}} ->
-        {:ok, %{"value" => nil}}
+    case :httpc.request(method, request, httpc_http_options(url), body_format: :binary) do
+      {:ok, {{_, status, _}, _resp_headers, resp_body}} ->
+        {:ok, status, resp_body}
 
-      {:ok, %HTTPoison.Response{body: body}} ->
-        with {:ok, decoded} <- Jason.decode(body),
-             {:ok, response} <- check_status(decoded) do
-          check_for_response_errors(response)
-        end
+      {:error, _reason} = err ->
+        err
+    end
+  end
+
+  defp httpc_headers do
+    [{~c"Accept", ~c"application/json"}, {~c"Content-Type", ~c"application/json;charset=UTF-8"}]
+  end
+
+  defp httpc_http_options(url) do
+    [
+      autoredirect: false,
+      ssl: ssl_options(url)
+    ]
+  end
+
+  defp ssl_options(url) do
+    case URI.parse(url) do
+      %URI{scheme: "https", host: host} when is_binary(host) ->
+        [
+          verify: :verify_peer,
+          cacerts: :public_key.cacerts_get(),
+          server_name_indication: to_charlist(host),
+          customize_hostname_check: [
+            match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+          ],
+          depth: 3
+        ]
+
+      _ ->
+        []
+    end
+  end
+
+  defp handle_response({:error, reason}), do: {:error, :httpc, reason}
+  defp handle_response({:ok, 204, _body}), do: {:ok, %{"value" => nil}}
+
+  defp handle_response({:ok, _status, body}) do
+    with {:ok, decoded} <- Jason.decode(body),
+         {:ok, response} <- check_status(decoded) do
+      check_for_response_errors(response)
     end
   end
 
@@ -142,14 +177,6 @@ defmodule Wallaby.HTTPClient do
       _ ->
         {:ok, response}
     end
-  end
-
-  defp request_opts do
-    Application.get_env(:wallaby, :hackney_options, hackney: [pool: :wallaby_pool])
-  end
-
-  defp headers do
-    [{"Accept", "application/json"}, {"Content-Type", "application/json;charset=UTF-8"}]
   end
 
   @spec to_params(Query.compiled()) :: map

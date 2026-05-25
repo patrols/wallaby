@@ -71,19 +71,12 @@ defmodule Wallaby.HTTPClientTest do
       assert {:error, ^expected_message} = Client.request(:post, bypass_url(bypass, "/my_url"))
     end
 
-    test "includes the original HTTPoison error when there is one", %{bypass: bypass} do
-      expected_message =
-        if Version.compare(System.version(), "1.16.0") in [:eq, :gt] do
-          "Wallaby had an internal issue with HTTPoison:\n%HTTPoison.Error{reason: :econnrefused, id: nil}"
-        else
-          "Wallaby had an internal issue with HTTPoison:\n%HTTPoison.Error{id: nil, reason: :econnrefused}"
-        end
-
+    test "includes the original HTTP error when there is one", %{bypass: bypass} do
       Bypass.down(bypass)
 
-      assert_raise RuntimeError, expected_message, fn ->
-        Client.request(:post, bypass_url(bypass, "/my_url"))
-      end
+      assert_raise RuntimeError,
+                   ~r/Wallaby had an internal issue with the webdriver HTTP request:.*econnrefused/s,
+                   fn -> Client.request(:post, bypass_url(bypass, "/my_url")) end
     end
 
     test "raises a runtime error when the request returns a generic error", %{bypass: bypass} do

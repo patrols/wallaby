@@ -1,9 +1,6 @@
 defmodule Wallaby.Chrome.Chromedriver.ReadinessChecker do
   @moduledoc false
 
-  alias WebDriverClient.Config
-  alias WebDriverClient.ServerStatus
-
   @type url :: String.t()
 
   @spec wait_until_ready(url, non_neg_integer()) :: :ok
@@ -19,33 +16,17 @@ defmodule Wallaby.Chrome.Chromedriver.ReadinessChecker do
 
   @spec ready?(url) :: boolean
   defp ready?(base_url) do
-    base_url
-    |> build_config()
-    |> WebDriverClient.fetch_server_status()
-    |> case do
-      {:ok, %ServerStatus{ready?: true}} -> true
-      _ -> false
+    status_url = String.trim_trailing(base_url, "/") <> "/status"
+
+    case :httpc.request(:get, {to_charlist(status_url), []}, [autoredirect: false], body_format: :binary) do
+      {:ok, {{_, 200, _}, _headers, body}} ->
+        case Jason.decode(body) do
+          {:ok, %{"value" => %{"ready" => true}}} -> true
+          _ -> false
+        end
+
+      _ ->
+        false
     end
-  end
-
-  # @spec build_config(url) :: Config.t()
-  def build_config(base_url) do
-    # Chromedriver responds to the status endpoint check in w3c
-    # protocol.
-    Config.build(base_url,
-      protocol: :w3c,
-      http_client_options: hackney_options()
-    )
-  end
-
-  @default_httpoison_options [hackney: [pool: :wallaby_pool]]
-
-  # The :hackney_options key in the environment is misnamed. These
-  # are actually the options as they're passed to HTTPoison.
-  @spec hackney_options() :: list
-  defp hackney_options do
-    :wallaby
-    |> Application.get_env(:hackney_options, @default_httpoison_options)
-    |> Keyword.get(:hackney, [])
   end
 end
