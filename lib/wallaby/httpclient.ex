@@ -86,10 +86,17 @@ defmodule Wallaby.HTTPClient do
   end
 
   defp httpc_http_options(url) do
-    [
-      autoredirect: false,
-      ssl: ssl_options(url)
-    ]
+    user_opts = Application.get_env(:wallaby, :httpc_options, [])
+
+    Keyword.merge(
+      [
+        autoredirect: false,
+        timeout: 240_000,
+        connect_timeout: 30_000,
+        ssl: ssl_options(url)
+      ],
+      user_opts
+    )
   end
 
   defp ssl_options(url) do
